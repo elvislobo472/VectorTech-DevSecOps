@@ -1,0 +1,234 @@
+name: DevSecOps CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+# Ensure only one deployment runs at a time per branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # -------------------------------------------
+  # Stage 1 & 5: Checkout & Secrets Scanning
+  # -------------------------------------------
+  security-secrets-scan:
+    name: Secrets Scanning (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Run Gitleaks Scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # -------------------------------------------
+  # Stage 2, 3 & 5: Backend Build, Test & SAST
+  # -------------------------------------------
+  build-test-backend:
+    name: Build & Test Backend
+    needs: security-secrets-scan
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java-version: ['17', '21']
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java ${{ matrix.java-version }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ matrix.java-version }}
+          cache: 'maven'
+
+      - name: Build and Test (JUnit)
+        working-directory: ./backend
+        run: mvn clean install -DskipTests=false
+
+      # Only run heavy scans on the primary matrix build (Java 17) to save time
+      - name: SonarQube Scan
+        if: matrix.java-version == '17'
+        working-directory: ./backend
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        # Exits gracefully if Sonar is not fully configured, otherwise fails on quality gate
+        run: |
+          if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
+            mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+              -Dsonar.projectKey=backend-microservice
+          else
+            echo "SonarQube secrets not provided. Skipping SAST scan."
+          fi
+
+      - name: OWASP Dependency Check
+        if: matrix.java-version == '17'
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'backend'
+          path: './backend'
+          format: 'HTML'
+          args: >
+            --failOnCVSS 7
+            --enableExperimental
+
+      - name: Upload OWASP Report
+        if: matrix.java-version == '17' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Backend-Dependency-Check-Report
+          path: reports/dependency-check-report.html
+
+  # -------------------------------------------
+  # Stage 2 & 4: Frontend Build
+  # -------------------------------------------
+  build-test-frontend:
+    name: Build & Test Frontend
+    needs: security-secrets-scan
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+        
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: './ecommerce-app/package.json' # Using package.json as fallback if lockfile is recreated
+
+      - name: Install Dependencies
+        working-directory: ./ecommerce-app
+        run: npm install
+
+      - name: Build Next.js App
+        working-directory: ./ecommerce-app
+        run: npm run build
+
+  # -------------------------------------------
+  # Stage 6: Docker Build & Container Scanning
+  # -------------------------------------------
+  docker-build-and-scan:
+    name: Docker Build & Trivy Scan
+    needs: [build-test-backend, build-test-frontend]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # --- Backend ---
+      - name: Build Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          load: true
+          tags: |
+            vectortech/backend:latest
+            vectortech/backend:${{ github.sha }}
+
+      - name: Run Trivy Vulnerability Scanner (Backend)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'vectortech/backend:${{ github.sha }}'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      # --- Frontend ---
+      - name: Build Frontend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./ecommerce-app
+          load: true
+          tags: |
+            vectortech/frontend:latest
+            vectortech/frontend:${{ github.sha }}
+
+      - name: Run Trivy Vulnerability Scanner (Frontend)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'vectortech/frontend:${{ github.sha }}'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+  # -------------------------------------------
+  # Stage 7: Deployment (Server/Local simulation)
+  # -------------------------------------------
+  deploy:
+    name: Deploy Application
+    needs: docker-build-and-scan
+    # Only deploy if changes are pushed to main (no PRs)
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # Deployment onto a remote server utilizing docker-compose
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_PRIVATE_KEY }}
+          script: |
+            cd /opt/vectortech/app || mkdir -p /opt/vectortech/app
+            # Optional: Pull latest codebase if server relies on repo files (like docker-compose.yml)
+            # git pull origin main
+            
+            # Spin up resources using docker-compose
+            # You can inject repository variables securely here
+            echo "Deploying newly built images..."
+            docker compose down
+            docker compose up -d --build
+            
+            # Verification step
+            echo "Checking container statuses..."
+            docker ps -a
+
+  # -------------------------------------------
+  # Final Stage: Notifications
+  # -------------------------------------------
+  notify:
+    name: Workflow Notifications
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Write Summary Notification
+        run: |
+          echo "### 🚀 CI/CD Pipeline Completed!" >> $GITHUB_STEP_SUMMARY
+          echo "Status: **${{ job.status }}**" >> $GITHUB_STEP_SUMMARY
+          echo "Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "Triggered by: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

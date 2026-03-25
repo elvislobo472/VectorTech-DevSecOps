@@ -1,0 +1,38 @@
+# Node
+node_modules
+npm-debug.log
+yarn-error.log
+.npm
+.next/cache
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git
+.gitignore
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml
+
+# Environment
+.env.local
+.env.*.local
+.env
+.env.*
+
+# Test
+.jest
+coverage
+
+# Temporary
+.cache
+temp
+tmp
