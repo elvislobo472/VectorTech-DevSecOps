@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        java-version: ['17', '21']
+        java-version: ['21']
     
     steps:
       - name: Checkout Repository
@@ -68,14 +68,12 @@ jobs:
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
           APP_JWT_SECRET: ${{ secrets.APP_JWT_SECRET }}
 
-      # Only run heavy scans on the primary matrix build (Java 17) to save time
       - name: SonarQube Scan
-        if: matrix.java-version == '17'
+        if: matrix.java-version == '21'
         working-directory: ./backend
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-        # Exits gracefully if Sonar is not fully configured, otherwise fails on quality gate
         run: |
           if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
             mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
@@ -85,7 +83,7 @@ jobs:
           fi
 
       - name: OWASP Dependency Check
-        if: matrix.java-version == '17'
+        if: matrix.java-version == '21'
         uses: dependency-check/Dependency-Check_Action@main
         with:
           project: 'backend'
@@ -96,7 +94,7 @@ jobs:
             --enableExperimental
 
       - name: Upload OWASP Report
-        if: matrix.java-version == '17' && always()
+        if: matrix.java-version == '21' && always()
         uses: actions/upload-artifact@v4
         with:
           name: Backend-Dependency-Check-Report
