@@ -62,6 +62,11 @@ jobs:
       - name: Build and Test (JUnit)
         working-directory: ./backend
         run: mvn clean install -DskipTests=false
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          SPRING_DATASOURCE_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          APP_JWT_SECRET: ${{ secrets.APP_JWT_SECRET }}
 
       # Only run heavy scans on the primary matrix build (Java 17) to save time
       - name: SonarQube Scan
@@ -145,6 +150,10 @@ jobs:
       # --- Backend ---
       - name: Build Backend Image
         uses: docker/build-push-action@v5
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          APP_JWT_SECRET: ${{ secrets.APP_JWT_SECRET }}
         with:
           context: ./backend
           load: true
@@ -199,6 +208,10 @@ jobs:
       # Deployment onto a remote server utilizing docker-compose
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
+        env: 
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          APP_JWT_SECRET: ${{ secrets.APP_JWT_SECRET }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
