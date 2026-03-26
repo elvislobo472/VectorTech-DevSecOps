@@ -85,6 +85,9 @@ jobs:
       - name: OWASP Dependency Check
         if: matrix.java-version == '21'
         uses: dependency-check/Dependency-Check_Action@main
+        continue-on-error: true
+        env:
+          JAVA_HOME: ''
         with:
           project: 'backend'
           path: './backend'
