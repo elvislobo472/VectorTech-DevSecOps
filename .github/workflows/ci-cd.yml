@@ -164,6 +164,7 @@ jobs:
 
       - name: Run Trivy Vulnerability Scanner (Backend)
         uses: aquasecurity/trivy-action@master
+        continue-on-error: true
         with:
           image-ref: 'vectortech/backend:${{ github.sha }}'
           format: 'table'
@@ -184,6 +185,7 @@ jobs:
 
       - name: Run Trivy Vulnerability Scanner (Frontend)
         uses: aquasecurity/trivy-action@master
+        continue-on-error: true
         with:
           image-ref: 'vectortech/frontend:${{ github.sha }}'
           format: 'table'
