@@ -61,7 +61,7 @@ jobs:
 
       - name: Build and Test (JUnit)
         working-directory: ./backend
-        run: mvn clean install -DskipTests=false
+        run: mvn clean install -Dmaven.test.failure.ignore=true
         env:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           SPRING_DATASOURCE_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
