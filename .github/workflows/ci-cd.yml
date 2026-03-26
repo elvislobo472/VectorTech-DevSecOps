@@ -212,8 +212,7 @@ jobs:
       - name: Deploy via SSH (Simulated for Demo)
         run: |
           echo "🚀 Simulating Deployment to Production Server..."
-          echo "In a real environment, this step would SSH into the server using 'appleboy/ssh-action'."
-          echo "Server Host would be: \${{ secrets.SERVER_HOST }}"
+          echo "In a real environment, this step would SSH into the server using appleboy/ssh-action."
           echo "Executing commands:"
           echo "  > cd /opt/vectortech/app"
           echo "  > git pull origin main"
